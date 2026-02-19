@@ -1,5 +1,5 @@
 """
-auth.py – JWT & password-hashing utilities for dealer authentication.
+security.py – JWT & password-hashing utilities for dealer authentication.
 
 Dependencies (already installed):
     python-jose[cryptography]   → JWT encode / decode

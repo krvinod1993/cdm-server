@@ -1,36 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models import Dealer
-from schemas import DealerRegister, DealerLogin, DealerBase, TokenResponse
-from auth import hash_password, verify_password, create_access_token
+from app.db.session import get_db
+from app.models.dealer import Dealer
+from app.schemas.dealer import DealerBase, DealerRegister, DealerLogin, TokenResponse
+from app.core.security import verify_password, create_access_token
+from app.services.dealer import register_dealer as register_dealer_service
 
 router = APIRouter(prefix="/api", tags=["Auth"])
 
 
 @router.post("/register", response_model=DealerBase, status_code=status.HTTP_201_CREATED)
 def register_dealer(payload: DealerRegister, db: Session = Depends(get_db)):
-    # Check if email already exists
-    existing = db.query(Dealer).filter(Dealer.email == payload.email).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A dealer with this email already exists",
-        )
-
-    # Create new dealer with hashed password
-    dealer = Dealer(
-        name=payload.name,
-        city=payload.city,
-        email=payload.email,
-        password_hash=hash_password(payload.password),
-    )
-
-    db.add(dealer)
-    db.commit()
-    db.refresh(dealer)
-
+    dealer = register_dealer_service(payload, db)
     return dealer
 
 
