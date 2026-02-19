@@ -17,3 +17,4 @@ class Car(Base):
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     dealer = relationship("Dealer", back_populates="cars", lazy="selectin")
+    leads = relationship("Lead", back_populates="car", cascade="all, delete")

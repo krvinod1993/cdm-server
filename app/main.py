@@ -6,7 +6,7 @@ from app.core.config import UPLOAD_DIR
 from app.db.base import Base
 from app.db.session import engine
 from app.models import City, Dealer, Car  # noqa: F401 — register models with Base
-from app.routers import auth, city, dealer, car
+from app.routers import auth, city, dealer, car, leads
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
@@ -30,6 +30,7 @@ app.include_router(auth.router)
 app.include_router(city.router)
 app.include_router(dealer.router)
 app.include_router(car.router)
+app.include_router(leads.router)
 
 
 @app.get("/health")

@@ -16,6 +16,7 @@ class Dealer(Base):
 
     city = relationship("City", back_populates="dealers", lazy="selectin")
     cars = relationship("Car", back_populates="dealer", lazy="selectin")
+    leads = relationship("Lead", back_populates="dealer", cascade="all, delete")
 
     def __repr__(self) -> str:
         return f"<Dealer {self.name}>"
