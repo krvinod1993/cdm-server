@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.dealer import DealerBase, DealerWithCars
+from app.schemas.dealer import DealerBase, DealerWithVehicles
 from app.services.dealer import get_dealers, get_dealer_by_id
 
 router = APIRouter(prefix="/api", tags=["Dealers"])
@@ -25,15 +25,15 @@ def list_dealers(
     Returns
     -------
     list[DealerBase]
-        Each dealer includes: id, name, email, city_id, city, created_at.
+        Each dealer includes: id, name, city_id, city, created_at.
     """
     return get_dealers(db, city_slug)
 
 
-@router.get("/dealers/{dealer_id}", response_model=DealerWithCars)
+@router.get("/dealers/{dealer_id}", response_model=DealerWithVehicles)
 def get_dealer(dealer_id: int, db: Session = Depends(get_db)):
     """
-    Get a single dealer by ID — includes their car listings.
+    Get a single dealer by ID — includes their vehicle listings.
 
     Path Parameters
     ---------------
@@ -41,8 +41,8 @@ def get_dealer(dealer_id: int, db: Session = Depends(get_db)):
 
     Returns
     -------
-    DealerWithCars
-        Dealer info + list of their cars.
+    DealerWithVehicles
+        Dealer info + list of their vehicles.
 
     Raises
     ------

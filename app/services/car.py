@@ -1,12 +1,12 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.car import Car
+from app.models.car import Vehicle
 from app.models.city import City
 from app.models.dealer import Dealer
 
 
-def get_marketplace_cars(
+def get_marketplace_vehicles(
     db: Session,
     *,
     city_slug: str | None = None,
@@ -19,12 +19,12 @@ def get_marketplace_cars(
     limit: int = 12,
 ) -> dict:
     """
-    Return paginated marketplace car listings from active cities.
+    Return paginated marketplace vehicle listings from active cities.
 
     Parameters
     ----------
     city_slug : str, optional
-        Filter cars whose dealer belongs to this city.
+        Filter vehicles whose dealer belongs to this city.
     search, brand, min_price, max_price : optional filters.
     sort : 'price_asc' or 'price_desc'.
     page, limit : pagination controls.
@@ -32,10 +32,10 @@ def get_marketplace_cars(
     Returns
     -------
     dict
-        {items: list[Car], total: int, page: int, limit: int}
+        {items: list[Vehicle], total: int, page: int, limit: int}
     """
     query = (
-        db.query(Car)
+        db.query(Vehicle)
         .join(Dealer)
         .join(City)
         .filter(City.is_active == True)
@@ -47,27 +47,27 @@ def get_marketplace_cars(
 
     # ── Search & filters ─────────────────────────────
     if search:
-        query = query.filter(Car.name.ilike(f"%{search}%"))
+        query = query.filter(Vehicle.name.ilike(f"%{search}%"))
 
     if brand:
-        query = query.filter(Car.brand == brand)
+        query = query.filter(Vehicle.brand == brand)
 
     if min_price is not None:
-        query = query.filter(Car.price >= min_price)
+        query = query.filter(Vehicle.price >= min_price)
 
     if max_price is not None:
-        query = query.filter(Car.price <= max_price)
+        query = query.filter(Vehicle.price <= max_price)
 
     # ── Total count (after filters, before pagination)
     total = query.count()
 
     # ── Sorting ──────────────────────────────────────
     if sort == "price_asc":
-        query = query.order_by(Car.price.asc())
+        query = query.order_by(Vehicle.price.asc())
     elif sort == "price_desc":
-        query = query.order_by(Car.price.desc())
+        query = query.order_by(Vehicle.price.desc())
     else:
-        query = query.order_by(Car.created_at.desc())
+        query = query.order_by(Vehicle.created_at.desc())
 
     # ── Pagination ───────────────────────────────────
     offset = (page - 1) * limit
@@ -81,19 +81,19 @@ def get_marketplace_cars(
     }
 
 
-def get_car_by_id(db: Session, car_id: int) -> Car:
+def get_vehicle_by_id(db: Session, vehicle_id: int) -> Vehicle:
     """
-    Return a single car by ID.
+    Return a single vehicle by ID.
 
     Raises
     ------
     HTTPException 404
-        If the car does not exist.
+        If the vehicle does not exist.
     """
-    car = db.query(Car).filter(Car.id == car_id).first()
-    if not car:
+    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
+    if not vehicle:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Car not found",
+            detail="Vehicle not found",
         )
-    return car
+    return vehicle

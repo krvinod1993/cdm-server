@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password
 from app.models.city import City
 from app.models.dealer import Dealer
+from app.models.permission import Permission
+from app.models.user import User
+from app.models.user_permission import UserPermission
 from app.schemas.dealer import DealerRegister
 
 
@@ -45,7 +48,7 @@ def get_dealer_by_id(db: Session, dealer_id: int) -> Dealer:
     return dealer
 
 
-def register_dealer(payload: DealerRegister, db: Session) -> Dealer:
+def register_dealer(payload: DealerRegister, db: Session) -> tuple[Dealer, User]:
     """
     Register a new dealer.
 
@@ -55,7 +58,7 @@ def register_dealer(payload: DealerRegister, db: Session) -> Dealer:
     2. Ensure the email is not already taken.
     3. Hash the password and persist the dealer.
 
-    Returns the newly created Dealer ORM instance (with city loaded).
+    Returns a tuple of (Dealer, User) ORM instances.
     """
 
     # ── Validate city ────────────────────────────────
@@ -73,24 +76,41 @@ def register_dealer(payload: DealerRegister, db: Session) -> Dealer:
             detail="Registration is not available for this city",
         )
 
-    # ── Duplicate email check ────────────────────────
-    existing = db.query(Dealer).filter(Dealer.email == payload.email).first()
+    # ── Duplicate email check (against User table) ──
+    existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A dealer with this email already exists",
+            detail="A user with this email already exists",
         )
 
-    # ── Create dealer ────────────────────────────────
+    # ── Create dealer (no email/password on dealer) ──
     dealer = Dealer(
         name=payload.name,
         city_id=payload.city_id,
-        email=payload.email,
-        password_hash=hash_password(payload.password),
     )
 
     db.add(dealer)
+    db.flush()  # get dealer.id without committing yet
+
+    # ── Create user linked to dealer ─────────────────
+    user = User(
+        email=payload.email,
+        password=hash_password(payload.password),
+        global_role="DEALER_OWNER",
+        dealer_id=dealer.id,
+    )
+
+    db.add(user)
+    db.flush()  # get user.id before assigning permissions
+
+    # ── Assign all permissions to owner ───────────────
+    all_permissions = db.query(Permission).all()
+    for perm in all_permissions:
+        db.add(UserPermission(user_id=user.id, permission_id=perm.id))
+
     db.commit()
     db.refresh(dealer)
+    db.refresh(user)
 
-    return dealer
+    return dealer, user

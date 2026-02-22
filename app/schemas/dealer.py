@@ -3,14 +3,13 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr
 
 from app.schemas.city import CityBase
-from app.schemas.car import CarBase
+from app.schemas.car import VehicleBase
 
 
 class DealerBase(BaseModel):
-    """Public dealer info — never includes password_hash."""
+    """Public dealer info — business fields only."""
     id: int
     name: str
-    email: str
     city_id: int
     city: CityBase
     created_at: datetime
@@ -18,8 +17,8 @@ class DealerBase(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class DealerWithCars(DealerBase):
-    cars: list[CarBase] = []
+class DealerWithVehicles(DealerBase):
+    vehicles: list[VehicleBase] = []
 
 
 # ── Dealer Auth ──────────────────────────────────────

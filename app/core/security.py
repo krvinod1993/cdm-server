@@ -12,6 +12,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from sqlalchemy.orm import Session
 
 # ── Configuration ────────────────────────────────────────────────────
 SECRET_KEY = "changeme-use-env-in-production"   # TODO: load from env / .env
@@ -91,3 +92,45 @@ def get_current_dealer(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+):
+    """
+    FastAPI dependency — decodes JWT and returns the full User ORM object.
+
+    Requires ``app.db.session.get_db`` to be injected at the router level.
+    """
+    from app.db.session import get_db
+    from app.models.user import User
+
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
+            raise JWTError("Missing sub claim")
+    except (JWTError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Resolve a DB session via the generator
+    db_gen = get_db()
+    db: Session = next(db_gen)
+    try:
+        user = db.query(User).filter(User.id == int(user_id)).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+            )
+        return user
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass

@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 
@@ -6,20 +7,22 @@ from sqlalchemy.orm import Session
 
 from app.core.config import UPLOAD_DIR
 from app.db.session import get_db
-from app.models.car import Car
-from app.schemas.car import CarBase, CarDetail, CarPublic, PaginatedCarResponse, PaginatedCarsResponse
+from app.models.car import Vehicle
+from app.models.user import User
+from app.schemas.car import VehicleBase, VehicleDetail, VehiclePublic, PaginatedVehicleResponse, PaginatedVehiclesResponse
 from app.core.security import get_current_dealer
-from app.services.car import get_marketplace_cars, get_car_by_id
+from app.services.car import get_marketplace_vehicles, get_vehicle_by_id
+from app.utils.permissions import require_permission
 
-router = APIRouter(prefix="/api", tags=["Cars"])
+router = APIRouter(prefix="/api", tags=["Vehicles"])
 
 
 # ── Marketplace (public) ─────────────────────────────
 
-@router.get("/cars", response_model=PaginatedCarsResponse)
-def list_cars(
-    city_slug: str | None = Query(None, description="Filter cars by city slug (e.g. 'noida')"),
-    search: str | None = Query(None, description="Search by car name (case-insensitive)"),
+@router.get("/vehicles", response_model=PaginatedVehiclesResponse)
+def list_vehicles(
+    city_slug: str | None = Query(None, description="Filter vehicles by city slug (e.g. 'noida')"),
+    search: str | None = Query(None, description="Search by vehicle name (case-insensitive)"),
     brand: str | None = Query(None, description="Filter by exact brand name"),
     min_price: float | None = Query(None, ge=0, description="Minimum price"),
     max_price: float | None = Query(None, ge=0, description="Maximum price"),
@@ -29,23 +32,23 @@ def list_cars(
     db: Session = Depends(get_db),
 ):
     """
-    Browse marketplace car listings — optionally filtered by city.
+    Browse marketplace vehicle listings — optionally filtered by city.
 
     Query Parameters
     ----------------
     city_slug : str, optional
-        Filter cars whose dealer belongs to this city.
+        Filter vehicles whose dealer belongs to this city.
     search, brand, min_price, max_price : optional filters.
     sort : 'price_asc' or 'price_desc'.
     page, limit : pagination controls.
 
     Returns
     -------
-    PaginatedCarsResponse
-        items: list[CarMarketplace]  (car + dealer summary)
+    PaginatedVehiclesResponse
+        items: list[VehicleMarketplace]  (vehicle + dealer summary)
         total, page, limit
     """
-    return get_marketplace_cars(
+    return get_marketplace_vehicles(
         db,
         city_slug=city_slug,
         search=search,
@@ -58,36 +61,36 @@ def list_cars(
     )
 
 
-@router.get("/cars/{car_id}", response_model=CarDetail)
-def get_car(car_id: int, db: Session = Depends(get_db)):
+@router.get("/vehicles/{vehicle_id}", response_model=VehicleDetail)
+def get_vehicle(vehicle_id: int, db: Session = Depends(get_db)):
     """
-    Get a single car by ID — includes full dealer info.
+    Get a single vehicle by ID — includes full dealer info.
 
     Path Parameters
     ---------------
-    car_id : int
+    vehicle_id : int
 
     Returns
     -------
-    CarDetail
-        Full car info + nested dealer with city.
+    VehicleDetail
+        Full vehicle info + nested dealer with city.
 
     Raises
     ------
     404
-        Car not found.
+        Vehicle not found.
     """
-    return get_car_by_id(db, car_id)
+    return get_vehicle_by_id(db, vehicle_id)
 
 
 # ── Legacy / Dashboard ───────────────────────────────
 
-@router.get("/home", response_model=list[CarBase])
-def home_cars(db: Session = Depends(get_db)):
-    return db.query(Car).all()
+@router.get("/home", response_model=list[VehicleBase])
+def home_vehicles(db: Session = Depends(get_db)):
+    return db.query(Vehicle).all()
 
 
-@router.get("/inventory", response_model=PaginatedCarResponse)
+@router.get("/inventory", response_model=PaginatedVehicleResponse)
 def public_inventory(
     search: str | None = Query(None, description="Filter by name (contains, case-insensitive)"),
     brand: str | None = Query(None, description="Filter by exact brand name"),
@@ -98,29 +101,29 @@ def public_inventory(
     limit: int = Query(6, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Car)
+    query = db.query(Vehicle)
 
     # ── Filters ─────────────────────────────────────
     if search:
-        query = query.filter(Car.name.ilike(f"%{search}%"))
+        query = query.filter(Vehicle.name.ilike(f"%{search}%"))
 
     if brand:
-        query = query.filter(Car.brand == brand)
+        query = query.filter(Vehicle.brand == brand)
 
     if min_price is not None:
-        query = query.filter(Car.price >= min_price)
+        query = query.filter(Vehicle.price >= min_price)
 
     if max_price is not None:
-        query = query.filter(Car.price <= max_price)
+        query = query.filter(Vehicle.price <= max_price)
 
     # ── Total count (after filters, before pagination) ──
     total = query.count()
 
     # ── Sorting ─────────────────────────────────────
     if sort == "price_asc":
-        query = query.order_by(Car.price.asc())
+        query = query.order_by(Vehicle.price.asc())
     elif sort == "price_desc":
-        query = query.order_by(Car.price.desc())
+        query = query.order_by(Vehicle.price.desc())
 
     # ── Pagination ──────────────────────────────────
     offset = (page - 1) * limit
@@ -134,24 +137,37 @@ def public_inventory(
     }
 
 
-@router.get("/my-cars", response_model=list[CarBase])
-def my_cars(
+@router.get("/my-vehicles", response_model=list[VehicleBase])
+def my_vehicles(
     dealer_id: int = Depends(get_current_dealer),
     db: Session = Depends(get_db),
 ):
-    return db.query(Car).filter(Car.dealer_id == dealer_id).all()
+    return db.query(Vehicle).filter(Vehicle.dealer_id == dealer_id).all()
 
 
-@router.post("/cars", response_model=CarBase, status_code=status.HTTP_201_CREATED)
-async def create_car(
+@router.post("/vehicles", response_model=VehicleBase, status_code=status.HTTP_201_CREATED)
+async def create_vehicle(
     name: str = Form(...),
     brand: str = Form(...),
     price: float = Form(...),
+    category_id: int | None = Form(None),
+    specifications: str | None = Form(None, description="JSON string of vehicle specifications"),
     status: str = Form("active"),
     image: UploadFile | None = File(None),
-    dealer_id: int = Depends(get_current_dealer),
+    current_user: User = Depends(require_permission("ADD_VEHICLE")),
     db: Session = Depends(get_db),
 ):
+    # Parse specifications JSON string
+    specs_dict = None
+    if specifications:
+        try:
+            specs_dict = json.loads(specifications)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=422,
+                detail="specifications must be a valid JSON string",
+            )
+
     image_url = None
 
     if image and image.filename:
@@ -166,77 +182,97 @@ async def create_car(
 
         image_url = f"/uploads/{unique_name}"
 
-    car = Car(
+    vehicle = Vehicle(
         name=name,
         brand=brand,
         price=price,
         status=status,
         image_url=image_url,
-        dealer_id=dealer_id,
+        dealer_id=current_user.dealer_id,
+        category_id=category_id,
+        specifications=specs_dict,
     )
 
-    db.add(car)
+    db.add(vehicle)
     db.commit()
-    db.refresh(car)
+    db.refresh(vehicle)
 
-    return car
+    return vehicle
 
 
-@router.delete("/cars/{car_id}")
-def delete_car(
-    car_id: int,
+@router.delete("/vehicles/{vehicle_id}")
+def delete_vehicle(
+    vehicle_id: int,
     dealer_id: int = Depends(get_current_dealer),
     db: Session = Depends(get_db),
 ):
-    car = db.query(Car).filter(Car.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="Car not found")
+    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
 
-    if car.dealer_id != dealer_id:
+    if vehicle.dealer_id != dealer_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to delete this car",
+            detail="You do not have permission to delete this vehicle",
         )
 
     # Remove image file if it exists
-    if car.image_url:
-        file_path = UPLOAD_DIR / car.image_url.lstrip("/").replace("uploads/", "", 1)
+    if vehicle.image_url:
+        file_path = UPLOAD_DIR / vehicle.image_url.lstrip("/").replace("uploads/", "", 1)
         if file_path.is_file():
             file_path.unlink()
 
-    db.delete(car)
+    db.delete(vehicle)
     db.commit()
-    return {"detail": "Car deleted"}
+    return {"detail": "Vehicle deleted"}
 
 
-@router.put("/cars/{car_id}", response_model=CarBase)
-async def update_car(
-    car_id: int,
-    name: str = Form(...),
-    brand: str = Form(...),
-    price: float = Form(...),
-    car_status: str = Form("active", alias="status"),
+@router.put("/vehicles/{vehicle_id}", response_model=VehicleBase)
+async def update_vehicle(
+    vehicle_id: int,
+    name: str | None = Form(None),
+    brand: str | None = Form(None),
+    price: float | None = Form(None),
+    category_id: int | None = Form(None),
+    specifications: str | None = Form(None, description="JSON string of vehicle specifications"),
+    vehicle_status: str | None = Form(None, alias="status"),
     image: UploadFile | None = File(None),
-    dealer_id: int = Depends(get_current_dealer),
+    current_user: User = Depends(require_permission("EDIT_VEHICLE")),
     db: Session = Depends(get_db),
 ):
-    # Check car exists
-    car = db.query(Car).filter(Car.id == car_id).first()
-    if not car:
-        raise HTTPException(status_code=404, detail="Car not found")
+    # Check vehicle exists
+    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
 
     # Verify ownership
-    if car.dealer_id != dealer_id:
+    if vehicle.dealer_id != current_user.dealer_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to edit this car",
+            detail="You do not have permission to edit this vehicle",
         )
 
-    # Update fields
-    car.name = name
-    car.brand = brand
-    car.price = price
-    car.status = car_status
+    # Only update fields that were explicitly provided (not None)
+    if name is not None:
+        vehicle.name = name
+    if brand is not None:
+        vehicle.brand = brand
+    if price is not None:
+        vehicle.price = price
+    if vehicle_status is not None:
+        vehicle.status = vehicle_status
+    if category_id is not None:
+        vehicle.category_id = category_id
+
+    # Parse and update specifications only if provided
+    if specifications is not None:
+        try:
+            vehicle.specifications = json.loads(specifications)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=422,
+                detail="specifications must be a valid JSON string",
+            )
 
     # Handle optional image upload
     if image and image.filename:
@@ -248,9 +284,9 @@ async def update_car(
         with open(file_path, "wb") as f:
             f.write(contents)
 
-        car.image_url = f"/uploads/{unique_name}"
+        vehicle.image_url = f"/uploads/{unique_name}"
 
     db.commit()
-    db.refresh(car)
+    db.refresh(vehicle)
 
-    return car
+    return vehicle
