@@ -10,6 +10,8 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, nullable=False)
     password = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=True)
+    phone = Column(String(20), nullable=True)
     global_role = Column(String(50), default="USER")
     dealer_id = Column(Integer, ForeignKey("dealers.id"), nullable=True)
     is_active = Column(Boolean, default=True)

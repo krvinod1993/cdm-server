@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password
+from app.core.security import get_current_user, hash_password
 from app.db.session import get_db
 from app.models.permission import Permission
 from app.models.user import User
@@ -28,6 +28,8 @@ class StaffResponse(BaseModel):
 class StaffListItem(BaseModel):
     id: int
     email: str
+    name: str | None = None
+    phone: str | None = None
     is_active: bool
     is_owner: bool
     role: str
@@ -79,6 +81,8 @@ def list_staff(
         StaffListItem(
             id=u.id,
             email=u.email,
+            name=u.name,
+            phone=u.phone,
             is_active=u.is_active,
             is_owner=(u.id == current_user.id),
             role=u.global_role or "DEALER_STAFF",
@@ -86,6 +90,57 @@ def list_staff(
         )
         for u in users
     ]
+
+
+# ── GET /api/staff/{staff_id} ─────────────────────────
+
+@router.get("/{staff_id}", response_model=StaffListItem)
+def get_staff_member(
+    staff_id: int,
+    current_user: User = Depends(require_any_permission("VIEW_STAFF", "MANAGE_STAFF")),
+    db: Session = Depends(get_db),
+):
+    if current_user.dealer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be linked to a dealer to view staff",
+        )
+
+    staff_user = db.query(User).filter(User.id == staff_id).first()
+    if not staff_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Staff user not found",
+        )
+
+    # Ensure staff belongs to the same dealer
+    if staff_user.dealer_id != current_user.dealer_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view staff within your own dealership",
+        )
+
+    # Fetch permissions via explicit join
+    perm_codes = [
+        code
+        for (code,) in (
+            db.query(Permission.code)
+            .join(UserPermission, UserPermission.permission_id == Permission.id)
+            .filter(UserPermission.user_id == staff_id)
+            .all()
+        )
+    ]
+
+    return StaffListItem(
+        id=staff_user.id,
+        email=staff_user.email,
+        name=staff_user.name,
+        phone=staff_user.phone,
+        is_active=staff_user.is_active,
+        is_owner=(staff_user.global_role == "DEALER_OWNER"),
+        role=staff_user.global_role or "DEALER_STAFF",
+        permissions=perm_codes,
+    )
 
 
 # ── POST /api/staff ──────────────────────────────────
@@ -185,27 +240,32 @@ def toggle_staff_active(
     return ToggleActiveResponse(id=staff_user.id, is_active=staff_user.is_active)
 
 
-# ── PATCH /api/staff/{staff_id}/permissions ──────────
+# ── PUT /api/staff/{staff_id} — update profile & permissions ─────────
 
-class UpdatePermissions(BaseModel):
+class StaffUpdate(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    permissions: list[str] | None = None
+
+
+class StaffUpdateResponse(BaseModel):
+    id: int
+    email: str
+    name: str | None = None
+    phone: str | None = None
     permissions: list[str]
 
+    model_config = {"from_attributes": True}
 
-@router.patch("/{staff_id}/permissions", response_model=StaffResponse)
-def update_staff_permissions(
+
+@router.put("/{staff_id}", response_model=StaffUpdateResponse)
+def update_staff(
     staff_id: int,
-    payload: UpdatePermissions,
-    current_user: User = Depends(require_permission("MANAGE_STAFF")),
+    payload: StaffUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Prevent self-modification
-    if staff_id == current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot modify your own permissions",
-        )
-
-    # Fetch staff user explicitly
+    # ── Fetch target user ────────────────────────────
     staff_user = db.query(User).filter(User.id == staff_id).first()
     if not staff_user:
         raise HTTPException(
@@ -213,35 +273,75 @@ def update_staff_permissions(
             detail="Staff user not found",
         )
 
-    # Protect dealer owner from being modified
-    if staff_user.global_role == "DEALER_OWNER":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Dealer Owner cannot be modified",
-        )
-
-    # Ensure staff belongs to the same dealer
+    # ── Ensure same dealer ───────────────────────────
     if staff_user.dealer_id != current_user.dealer_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only manage staff within your own dealership",
         )
 
-    # Delete all existing permissions for this staff user
-    db.query(UserPermission).filter(UserPermission.user_id == staff_id).delete()
+    # ── Dealer Owner: allow profile updates only ─────
+    if staff_user.global_role == "DEALER_OWNER":
+        payload.permissions = None  # never touch owner permissions
 
-    # Assign new permissions
-    assigned_codes: list[str] = []
-    for code in payload.permissions:
-        perm = db.query(Permission).filter(Permission.code == code).first()
-        if not perm:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Permission '{code}' does not exist",
+    is_self_edit = current_user.id == staff_id
+
+    # ── Editing others: require MANAGE_STAFF ─────────
+    if not is_self_edit:
+        has_manage = (
+            db.query(UserPermission)
+            .join(Permission)
+            .filter(
+                UserPermission.user_id == current_user.id,
+                Permission.code == "MANAGE_STAFF",
             )
-        db.add(UserPermission(user_id=staff_id, permission_id=perm.id))
-        assigned_codes.append(code)
+            .first()
+        )
+        if not has_manage:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You need MANAGE_STAFF permission to edit other users",
+            )
+
+    # ── Update profile fields (if provided) ──────────
+    if payload.name is not None:
+        staff_user.name = payload.name
+    if payload.phone is not None:
+        staff_user.phone = payload.phone
+
+    # ── Update permissions (only when editing others) ─
+    if payload.permissions is not None:
+        # Delete existing permissions
+        db.query(UserPermission).filter(UserPermission.user_id == staff_id).delete()
+
+        # Assign new permissions
+        for code in payload.permissions:
+            perm = db.query(Permission).filter(Permission.code == code).first()
+            if not perm:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Permission '{code}' does not exist",
+                )
+            db.add(UserPermission(user_id=staff_id, permission_id=perm.id))
 
     db.commit()
+    db.refresh(staff_user)
 
-    return StaffResponse(id=staff_id, permissions=assigned_codes)
+    # ── Build response with current permissions ──────
+    perm_codes = [
+        code
+        for (code,) in (
+            db.query(Permission.code)
+            .join(UserPermission, UserPermission.permission_id == Permission.id)
+            .filter(UserPermission.user_id == staff_id)
+            .all()
+        )
+    ]
+
+    return StaffUpdateResponse(
+        id=staff_user.id,
+        email=staff_user.email,
+        name=staff_user.name,
+        phone=staff_user.phone,
+        permissions=perm_codes,
+    )
