@@ -1,9 +1,12 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user, verify_password, create_access_token
 from app.db.session import get_db
+from app.models.dealer import Dealer
 from app.models.permission import Permission
 from app.models.user import User
 from app.models.user_permission import UserPermission
@@ -63,6 +66,9 @@ class MeResponse(BaseModel):
     dealer_id: int | None
     is_active: bool
     permissions: list[str]
+    plan_type: str | None = None
+    subscription_status: str | None = None
+    trial_end_date: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -82,6 +88,18 @@ def get_me(
         )
     ]
 
+    # Fetch subscription info from the associated dealer
+    plan_type = None
+    subscription_status = None
+    trial_end_date = None
+
+    if current_user.dealer_id is not None:
+        dealer = db.query(Dealer).filter(Dealer.id == current_user.dealer_id).first()
+        if dealer:
+            plan_type = dealer.plan_type
+            subscription_status = dealer.subscription_status
+            trial_end_date = dealer.trial_end_date
+
     return MeResponse(
         id=current_user.id,
         email=current_user.email,
@@ -89,4 +107,7 @@ def get_me(
         dealer_id=current_user.dealer_id,
         is_active=current_user.is_active,
         permissions=perm_codes,
+        plan_type=plan_type,
+        subscription_status=subscription_status,
+        trial_end_date=trial_end_date,
     )

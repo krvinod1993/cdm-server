@@ -109,7 +109,7 @@ def _build_require_active_subscription():
         if dealer.subscription_status == "EXPIRED":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your subscription has expired. Please renew to continue.",
+                detail="Subscription expired. Please subscribe to continue.",
             )
 
     return require_active_subscription

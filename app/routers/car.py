@@ -1,8 +1,11 @@
 import json
 import os
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import UPLOAD_DIR
@@ -10,6 +13,7 @@ from app.core.trial import require_active_subscription
 from app.db.session import get_db
 from app.models.car import Vehicle
 from app.models.dealer import Dealer
+from app.models.lead import Lead
 from app.models.user import User
 from app.schemas.car import VehicleBase, VehicleDetail, VehiclePublic, PaginatedVehicleResponse, PaginatedVehiclesResponse
 from app.core.security import get_current_dealer, get_current_user
@@ -106,6 +110,59 @@ def get_vehicle(vehicle_id: int, db: Session = Depends(get_db)):
         Vehicle not found.
     """
     return get_vehicle_by_id(db, vehicle_id)
+
+
+# ── Dashboard stats ───────────────────────────────────
+
+class DashboardStatsOut(BaseModel):
+    total_vehicles: int
+    total_leads: int
+    leads_today: int
+
+
+@router.get("/dashboard-stats", response_model=DashboardStatsOut)
+def dashboard_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Unified dashboard stats for the current dealer.
+
+    **Not gated by subscription status** — expired dealers can still
+    view their aggregate counts.
+
+    - **total_vehicles**: all vehicles belonging to the dealer, regardless of status
+    - **total_leads**: all-time lead count for the dealer
+    - **leads_today**: leads created today
+    """
+    dealer_id = current_user.dealer_id
+
+    total_vehicles = (
+        db.query(func.count(Vehicle.id))
+        .filter(Vehicle.dealer_id == dealer_id)
+        .scalar()
+    )
+
+    total_leads = (
+        db.query(func.count(Lead.id))
+        .filter(Lead.dealer_id == dealer_id)
+        .scalar()
+    )
+
+    leads_today = (
+        db.query(func.count(Lead.id))
+        .filter(
+            Lead.dealer_id == dealer_id,
+            func.date(Lead.created_at) == date.today(),
+        )
+        .scalar()
+    )
+
+    return DashboardStatsOut(
+        total_vehicles=total_vehicles,
+        total_leads=total_leads,
+        leads_today=leads_today,
+    )
 
 
 # ── Legacy / Dashboard ───────────────────────────────

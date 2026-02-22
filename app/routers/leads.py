@@ -77,6 +77,7 @@ class LeadOut(BaseModel):
 def my_leads(
     current_user: User = Depends(require_permission("VIEW_LEADS")),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     """
     Return all leads for the currently authenticated dealer,
