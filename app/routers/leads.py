@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_dealer, get_current_user
+from app.core.trial import require_active_subscription
 from app.db.session import get_db
 from app.models.car import Vehicle
 from app.models.lead import Lead
@@ -152,6 +153,7 @@ def update_lead_status(
     payload: LeadStatusUpdate,
     current_user: User = Depends(require_permission("VIEW_LEADS")),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     """
     Update the status of a lead.

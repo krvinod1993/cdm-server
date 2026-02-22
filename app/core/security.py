@@ -128,6 +128,11 @@ def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found",
             )
+
+        # ── Trial-expiry check (runs on every authenticated request) ──
+        from app.core.trial import enforce_trial_expiry
+        enforce_trial_expiry(user.dealer_id, db)
+
         return user
     finally:
         try:

@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user, hash_password
+from app.core.trial import require_active_subscription
 from app.db.session import get_db
 from app.models.permission import Permission
 from app.models.user import User
@@ -49,6 +50,7 @@ class ToggleActiveResponse(BaseModel):
 def list_staff(
     current_user: User = Depends(require_any_permission("VIEW_STAFF", "MANAGE_STAFF")),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     if current_user.dealer_id is None:
         raise HTTPException(
@@ -99,6 +101,7 @@ def get_staff_member(
     staff_id: int,
     current_user: User = Depends(require_any_permission("VIEW_STAFF", "MANAGE_STAFF")),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     if current_user.dealer_id is None:
         raise HTTPException(
@@ -150,6 +153,7 @@ def create_staff(
     payload: StaffCreate,
     current_user: User = Depends(require_permission("MANAGE_STAFF")),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     # ── Validate dealer link ─────────────────────────
     if current_user.dealer_id is None:
@@ -202,6 +206,7 @@ def toggle_staff_active(
     staff_id: int,
     current_user: User = Depends(require_permission("MANAGE_STAFF")),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     # Prevent self-deactivation
     if staff_id == current_user.id:
@@ -264,6 +269,7 @@ def update_staff(
     payload: StaffUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     # ── Fetch target user ────────────────────────────
     staff_user = db.query(User).filter(User.id == staff_id).first()

@@ -6,22 +6,23 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.orm import Session
 
 from app.core.config import UPLOAD_DIR
+from app.core.trial import require_active_subscription
 from app.db.session import get_db
 from app.models.car import Vehicle
+from app.models.dealer import Dealer
 from app.models.user import User
 from app.schemas.car import VehicleBase, VehicleDetail, VehiclePublic, PaginatedVehicleResponse, PaginatedVehiclesResponse
-from app.core.security import get_current_dealer
-from app.services.car import get_marketplace_vehicles, get_vehicle_by_id
+from app.core.security import get_current_dealer, get_current_user
+from app.services.car import get_vehicle_by_id
 from app.utils.permissions import require_permission
 
 router = APIRouter(prefix="/api", tags=["Vehicles"])
 
 
-# ── Marketplace (public) ─────────────────────────────
+# ── Dealer's own vehicles (authenticated) ────────────
 
 @router.get("/vehicles", response_model=PaginatedVehiclesResponse)
 def list_vehicles(
-    city_slug: str | None = Query(None, description="Filter vehicles by city slug (e.g. 'noida')"),
     search: str | None = Query(None, description="Search by vehicle name (case-insensitive)"),
     brand: str | None = Query(None, description="Filter by exact brand name"),
     min_price: float | None = Query(None, ge=0, description="Minimum price"),
@@ -29,15 +30,15 @@ def list_vehicles(
     sort: str | None = Query(None, pattern="^(price_asc|price_desc)$", description="Sort: price_asc or price_desc"),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     limit: int = Query(12, ge=1, le=100, description="Items per page"),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     """
-    Browse marketplace vehicle listings — optionally filtered by city.
+    List vehicles belonging to the authenticated dealer.
 
     Query Parameters
     ----------------
-    city_slug : str, optional
-        Filter vehicles whose dealer belongs to this city.
     search, brand, min_price, max_price : optional filters.
     sort : 'price_asc' or 'price_desc'.
     page, limit : pagination controls.
@@ -45,20 +46,44 @@ def list_vehicles(
     Returns
     -------
     PaginatedVehiclesResponse
-        items: list[VehicleMarketplace]  (vehicle + dealer summary)
-        total, page, limit
+        items, total, page, limit
     """
-    return get_marketplace_vehicles(
-        db,
-        city_slug=city_slug,
-        search=search,
-        brand=brand,
-        min_price=min_price,
-        max_price=max_price,
-        sort=sort,
-        page=page,
-        limit=limit,
-    )
+    query = db.query(Vehicle).filter(Vehicle.dealer_id == current_user.dealer_id)
+
+    # ── Filters ─────────────────────────────────────
+    if search:
+        query = query.filter(Vehicle.name.ilike(f"%{search}%"))
+
+    if brand:
+        query = query.filter(Vehicle.brand == brand)
+
+    if min_price is not None:
+        query = query.filter(Vehicle.price >= min_price)
+
+    if max_price is not None:
+        query = query.filter(Vehicle.price <= max_price)
+
+    # ── Total count (after filters, before pagination) ──
+    total = query.count()
+
+    # ── Sorting ─────────────────────────────────────
+    if sort == "price_asc":
+        query = query.order_by(Vehicle.price.asc())
+    elif sort == "price_desc":
+        query = query.order_by(Vehicle.price.desc())
+    else:
+        query = query.order_by(Vehicle.created_at.desc())
+
+    # ── Pagination ──────────────────────────────────
+    offset = (page - 1) * limit
+    items = query.offset(offset).limit(limit).all()
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+    }
 
 
 @router.get("/vehicles/{vehicle_id}", response_model=VehicleDetail)
@@ -87,7 +112,15 @@ def get_vehicle(vehicle_id: int, db: Session = Depends(get_db)):
 
 @router.get("/home", response_model=list[VehicleBase])
 def home_vehicles(db: Session = Depends(get_db)):
-    return db.query(Vehicle).all()
+    return (
+        db.query(Vehicle)
+        .join(Dealer, Vehicle.dealer_id == Dealer.id)
+        .filter(
+            Vehicle.status == "active",
+            Dealer.subscription_status != "EXPIRED",
+        )
+        .all()
+    )
 
 
 @router.get("/inventory", response_model=PaginatedVehicleResponse)
@@ -101,7 +134,14 @@ def public_inventory(
     limit: int = Query(6, ge=1, le=100, description="Items per page"),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Vehicle)
+    query = (
+        db.query(Vehicle)
+        .join(Dealer, Vehicle.dealer_id == Dealer.id)
+        .filter(
+            Vehicle.status == "active",
+            Dealer.subscription_status != "EXPIRED",
+        )
+    )
 
     # ── Filters ─────────────────────────────────────
     if search:
@@ -156,6 +196,7 @@ async def create_vehicle(
     image: UploadFile | None = File(None),
     current_user: User = Depends(require_permission("ADD_VEHICLE")),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     # Parse specifications JSON string
     specs_dict = None
@@ -205,6 +246,7 @@ def delete_vehicle(
     vehicle_id: int,
     dealer_id: int = Depends(get_current_dealer),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
     if not vehicle:
@@ -239,6 +281,7 @@ async def update_vehicle(
     image: UploadFile | None = File(None),
     current_user: User = Depends(require_permission("EDIT_VEHICLE")),
     db: Session = Depends(get_db),
+    _sub: None = Depends(require_active_subscription),
 ):
     # Check vehicle exists
     vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()

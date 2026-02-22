@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.car import Vehicle
+from app.models.dealer import Dealer
 from app.schemas.car import PaginatedPublicVehiclesResponse, PublicVehicleDetail
 
 router = APIRouter(prefix="/api/public", tags=["Public Vehicles"])
@@ -43,7 +44,14 @@ def list_public_vehicles(
     Includes category name and dealer name.
     Supports filtering, sorting, and pagination.
     """
-    query = db.query(Vehicle).filter(Vehicle.status == "active")
+    query = (
+        db.query(Vehicle)
+        .join(Dealer, Vehicle.dealer_id == Dealer.id)
+        .filter(
+            Vehicle.status == "active",
+            Dealer.subscription_status != "EXPIRED",
+        )
+    )
 
     # ── Filters ──────────────────────────────────────
     if search:
@@ -91,7 +99,12 @@ def get_public_vehicle(vehicle_id: int, db: Session = Depends(get_db)):
     """
     vehicle = (
         db.query(Vehicle)
-        .filter(Vehicle.id == vehicle_id, Vehicle.status == "active")
+        .join(Dealer, Vehicle.dealer_id == Dealer.id)
+        .filter(
+            Vehicle.id == vehicle_id,
+            Vehicle.status == "active",
+            Dealer.subscription_status != "EXPIRED",
+        )
         .first()
     )
 

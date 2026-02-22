@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -85,9 +87,14 @@ def register_dealer(payload: DealerRegister, db: Session) -> tuple[Dealer, User]
         )
 
     # ── Create dealer (no email/password on dealer) ──
+    now = datetime.now(timezone.utc)
     dealer = Dealer(
         name=payload.name,
         city_id=payload.city_id,
+        plan_type="FREE",
+        subscription_status="TRIAL",
+        trial_start_date=now,
+        trial_end_date=now + timedelta(days=90),
     )
 
     db.add(dealer)
