@@ -20,6 +20,7 @@ _SORT_FIELD_MAP = {
 def list_public_vehicles(
     search: str | None = Query(None, description="Search by vehicle name (case-insensitive)"),
     brand: str | None = Query(None, description="Filter by exact brand name"),
+    dealer_id: int | None = Query(None, description="Filter by dealer ID"),
     category_id: int | None = Query(None, description="Filter by category"),
     min_price: float | None = Query(None, ge=0, description="Minimum price"),
     max_price: float | None = Query(None, ge=0, description="Maximum price"),
@@ -49,7 +50,7 @@ def list_public_vehicles(
         .join(Dealer, Vehicle.dealer_id == Dealer.id)
         .filter(
             Vehicle.status == "active",
-            Dealer.subscription_status != "EXPIRED",
+            Dealer.subscription_status.in_(("ACTIVE", "TRIAL")),
         )
     )
 
@@ -59,6 +60,9 @@ def list_public_vehicles(
 
     if brand:
         query = query.filter(Vehicle.brand.ilike(f"%{brand}%"))
+
+    if dealer_id:
+        query = query.filter(Vehicle.dealer_id == dealer_id)
 
     if category_id is not None:
         query = query.filter(Vehicle.category_id == category_id)
@@ -103,7 +107,7 @@ def get_public_vehicle(vehicle_id: int, db: Session = Depends(get_db)):
         .filter(
             Vehicle.id == vehicle_id,
             Vehicle.status == "active",
-            Dealer.subscription_status != "EXPIRED",
+            Dealer.subscription_status.in_(("ACTIVE", "TRIAL")),
         )
         .first()
     )

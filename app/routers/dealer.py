@@ -50,3 +50,13 @@ def get_dealer(dealer_id: int, db: Session = Depends(get_db)):
         Dealer not found.
     """
     return get_dealer_by_id(db, dealer_id)
+
+
+@router.get("/public/dealers/{dealer_id}", response_model=DealerWithVehicles)
+def get_public_dealer(dealer_id: int, db: Session = Depends(get_db)):
+    """
+    Public dealer detail endpoint.
+
+    Returns dealer data only when subscription_status is ACTIVE or TRIAL.
+    """
+    return get_dealer_by_id(db, dealer_id)

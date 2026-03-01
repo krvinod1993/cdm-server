@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
@@ -120,6 +121,10 @@ class DashboardStatsOut(BaseModel):
     leads_today: int
 
 
+class VehicleStatusUpdateIn(BaseModel):
+    status: Literal["active", "inactive", "sold", "draft"]
+
+
 @router.get("/dashboard-stats", response_model=DashboardStatsOut)
 def dashboard_stats(
     current_user: User = Depends(get_current_user),
@@ -163,6 +168,35 @@ def dashboard_stats(
         total_leads=total_leads,
         leads_today=leads_today,
     )
+
+
+@router.patch("/dealer/vehicles/{vehicle_id}/status", response_model=VehicleBase)
+def update_dealer_vehicle_status(
+    vehicle_id: int,
+    payload: VehicleStatusUpdateIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.dealer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Dealer account required",
+        )
+
+    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+
+    if vehicle.dealer_id != current_user.dealer_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to update this vehicle",
+        )
+
+    vehicle.status = payload.status
+    db.commit()
+    db.refresh(vehicle)
+    return vehicle
 
 
 # ── Legacy / Dashboard ───────────────────────────────

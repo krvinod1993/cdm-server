@@ -41,7 +41,14 @@ def get_dealer_by_id(db: Session, dealer_id: int) -> Dealer:
     HTTPException 404
         If the dealer does not exist.
     """
-    dealer = db.query(Dealer).filter(Dealer.id == dealer_id).first()
+    dealer = (
+        db.query(Dealer)
+        .filter(
+            Dealer.id == dealer_id,
+            Dealer.subscription_status.in_(("ACTIVE", "TRIAL")),
+        )
+        .first()
+    )
     if not dealer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
