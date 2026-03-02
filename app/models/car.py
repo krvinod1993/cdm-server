@@ -21,6 +21,7 @@ class Vehicle(Base):
     dealer = relationship("Dealer", back_populates="vehicles", lazy="selectin")
     category = relationship("VehicleCategory", back_populates="vehicles", lazy="selectin")
     leads = relationship("Lead", back_populates="vehicle", cascade="all, delete")
+    wishlists = relationship("Wishlist", back_populates="vehicle", cascade="all, delete-orphan")
 
     @property
     def category_name(self) -> str | None:
